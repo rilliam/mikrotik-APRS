@@ -1,0 +1,81 @@
+#!rsc
+# RouterOS script: aprs
+# APRS TCPIP MIKROTIK SCRIPT
+# Adjust :set $latDD [:pick "$rawLat" x x] where x x is correct for your hemisphere
+# Adjust :set $latDD [:pick "$rawLon" x x] where x x is correct for your hemisphere
+# Adjust UUUUU and PPPPP for your APRS username and password
+# Note RouterOS \system\GPS: Coordinate Format must be set to "dms"
+# system gps set coordinate-format=dms
+
+# Set variables from output of /system gps monitor
+:global lat
+:global lon
+/system gps monitor once do={
+:set $rawLat $("latitude")
+:set $rawLon $("longitude")
+
+# Normal operation
+:set $rawSpeed $("speed")
+
+# Simulate mobile operation
+#:set $rawSpeed "21.018520 km/h"
+}
+
+# Convert "DMS" Coordinate Format to "DDMMSS"
+#
+# set DDMMSS Lat\Long Degrees from $rawLat $rawLon
+# works for western united states and canada only! 
+# Latitude Degrees are 0-90 / Longitude Degrees are 0-180
+:set $latDD [:pick "$rawLat" 2 4]
+:set $lonDD [:pick "$rawLon" 2 5]
+# set DDMMSS Minutes from $rawLat $rawLon
+:set $latMM [:pick "$rawLat" 5 ([:find "$rawLat" "'"])]
+:set $lonMM [:pick "$rawLon" 6 ([:find "$rawLon" "'"])]
+# set DDNNSS Seconds from $rawLat $rawLon
+:set $latSec [:pick "$rawLat" ([:find "$rawLat" "' "]+2) ([:find "$rawLat" "''"])]
+:set $lonSec [:pick "$rawLon" ([:find "$rawLon" "'"]+2) ([:find "$rawLon" "''"])]
+
+# Convert "DDMMSS" Coordinate Format to "DDMM.MMMM"(APRS protocol spec)
+#
+# Divide DDMMSS Seconds by 60
+:set $loncalc ($lonSec / 60)
+:set $latcalc ($latSec / 60)
+# Add DDMMSS Minutes and product of above (Divde DDMMSS Seconds by 60)
+:set $lonDecM ($lonMM + $loncalc);
+:set $latDecM ($latMM + $latcalc);
+# Concatenate Decimal Minutes
+:set $lonDecMMMM [:pick "$lonDecM" ([:find "$lonDecM" ":"]+4) ([:find "$lonDecM" "."]+3)]
+:set $latDecMMMM [:pick "$latDecM" ([:find "$latDecM" ":"]+4) ([:find "$latDecM" "."]+3)]
+# set direction N/S E/W from $rawLat $rawLon respectively
+:set $lonDir [:pick "$rawLon" 0]
+:set $latDir [:pick "$rawLat" 0]
+# Concatenate to DDMM.MMMMM
+:set $lonAPRS ("$lonDD" ."$lonDecMMMM" ."$lonDir");
+:set $latAPRS ("$latDD" ."$latDecMMMM" ."$latDir");
+
+# Convert Decimal Speed to integer speed
+:set $integerSpeed [:pick "$rawSpeed" 0 [:find "$rawSpeed" "." 0]];
+
+# HTTP Post to APRS-IS
+# Note: Requires line feed at beginning of http-data
+# Note: k represents "APRS symbol" example: truck
+{
+   :if ($integerSpeed > 6) do={ 
+/tool fetch http-method=post http-header-field="accept-type: text/plain,content-type: application/octet-stream,content-length: 93" port=8080 url=http://srvr.aprs-is.net/ http-data=("
+user UUUUU pass PPPP vers mikrotik
+UUUUU-10>APRS,TCPIP*:=$latAPRS"."/$lonAPRS"."k")
+} else={ :put "\nSTATIONARY" }
+}
+
+# Dump all variables to console
+:put "\nDMS -----($rawLat) \\ ($rawLon)";
+:put "DD ------($latDD) \\ ($lonDD)";
+:put "MM ------($latMM) \\ ($lonMM)";
+:put "Sec -----($latSec) \\ ($lonSec)";
+:put "calc ----($latcalc) \\ ($loncalc)";
+:put "M -------($latDecM) \\ ($lonDecM)";
+:put "MMMM ----($latDecMMMM) \\ ($lonDecMMMM)";
+:put "Dir -----($latDir) \\ ($lonDir)";
+:put "APRS ----($latAPRS) \\ ($lonAPRS)";
+:put "\nSpeed -----------($rawSpeed)";
+:put "integerSpeed ----($integerSpeed)\n";
